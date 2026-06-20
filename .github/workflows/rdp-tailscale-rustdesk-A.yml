@@ -121,6 +121,6 @@ jobs:
         run: |
           $end = (Get-Date).AddMinutes(355)
           while ((Get-Date) -lt $end) {
-            Write-Host "[RDP/RustDesk] Heartbeat $(Get-Date.ToString('HH:mm:ss')) | Ends at $($end.ToString('HH:mm:ss'))"
+            Write-Host "[RDP/RustDesk] Heartbeat $(Get-Date -Format 'HH:mm:ss') | Ends at $($end.ToString('HH:mm:ss'))"
             Start-Sleep -Seconds 60
           }
