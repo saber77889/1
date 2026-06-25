@@ -61,8 +61,8 @@ jobs:
         run: |
           sudo apt-get update
           
-          # Install only what is needed for RDP
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xrdp xorgxrdp
+          # Install xfce4, xrdp, and dbus-x11 (crucial for headless dbus routing)
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xrdp xorgxrdp dbus-x11
           
           # Add xrdp user to ssl-cert group to prevent permission issues
           sudo adduser xrdp ssl-cert
@@ -72,16 +72,21 @@ jobs:
           echo "$RDP_USER:$RDP_PASS" | sudo chpasswd
           sudo usermod -aG sudo $RDP_USER
           
-          # 1. Set .xsession for the user
-          echo "startxfce4" | sudo tee /home/$RDP_USER/.xsession
-          sudo chown $RDP_USER:$RDP_USER /home/$RDP_USER/.xsession
+          # Overwrite the XRDP startup script to inject the XDG paths and dbus session
+          sudo bash -c 'cat > /etc/xrdp/startwm.sh <<EOF
+          #!/bin/sh
+          if [ -r /etc/default/locale ]; then
+            . /etc/default/locale
+            export LANG LANGUAGE
+          fi
+          export XDG_CONFIG_DIRS=/etc/xdg
+          export XDG_DATA_DIRS=/usr/share:/usr/share/xfce4:/usr/local/share
+          exec dbus-run-session -- xfce4-session
+          EOF'
           
-          # 2. OVERRIDE startwm.sh (This fixes the crash at the login screen)
-          sudo sed -i 's/^test -x \/etc\/X11\/Xsession/# test -x \/etc\/X11\/Xsession/' /etc/xrdp/startwm.sh
-          sudo sed -i 's/^exec \/bin\/sh \/etc\/X11\/Xsession/# exec \/bin\/sh \/etc\/X11\/Xsession/' /etc/xrdp/startwm.sh
-          echo "startxfce4" | sudo tee -a /etc/xrdp/startwm.sh
-          
+          sudo chmod +x /etc/xrdp/startwm.sh
           sudo systemctl restart xrdp
+          
           echo "RDP User and XRDP Server configured successfully."
 
       - name: Keep Alive (355 mins)
