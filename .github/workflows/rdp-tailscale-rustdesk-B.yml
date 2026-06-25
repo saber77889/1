@@ -50,6 +50,7 @@ jobs:
         run: |
           echo "Downloading and installing Tailscale..."
           curl -fsSL https://tailscale.com/install.sh | sh
+          
           echo "Connecting to Tailscale..."
           sudo tailscale up --authkey="${{ inputs.ts_authkey }}" --hostname="${TS_HOSTNAME}" --accept-routes --accept-dns=false
           
@@ -59,8 +60,9 @@ jobs:
       - name: Install Desktop Environment & XRDP
         run: |
           sudo apt-get update
-          # Install xfce4, xrdp, virtual framebuffer (xvfb), and screenshot tool (scrot)
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xrdp xvfb scrot
+          
+          # Install xfce4, xrdp, virtual framebuffer (xvfb), screenshot tool (scrot), and dbus-x11 (required for xfce4 headless)
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xrdp xvfb scrot dbus-x11
           
           sudo systemctl enable xrdp
           sudo systemctl start xrdp
@@ -89,11 +91,11 @@ jobs:
           Xvfb :99 -screen 0 1280x1024x24 &
           export DISPLAY=:99
           
-          # Start the desktop environment in the background
-          xfce4-session &
+          # Start the desktop environment wrapped in dbus-run-session to prevent crashes
+          dbus-run-session xfce4-session &
           sleep 5
           
-          # Launch RustDesk
+          # Launch RustDesk in the background
           rustdesk &
           sleep 10
           
