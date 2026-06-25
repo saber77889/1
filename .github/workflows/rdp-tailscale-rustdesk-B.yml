@@ -1,118 +1,21 @@
-name: RDP + Tailscale + RustDesk Minimal Linux
-
-on:
-  workflow_dispatch:
-    inputs:
-      ts_authkey:
-        description: "Tailscale Auth key (reusable or ephemeral)"
-        required: true
-      rdp_count:
-        description: "How many RDP instances (1-10)"
-        required: false
-        default: "1"
-
-permissions:
-  contents: read
-  actions: write
-
-jobs:
-  setup:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: pwsh
-    outputs:
-      matrix: ${{ steps.mk.outputs.matrix }}
-    steps:
-      - id: mk
+- name: Launch Virtual Display, RustDesk & Screenshot
         run: |
-          $n = [int]"${{ inputs.rdp_count }}"
-          if ($n -lt 1) { $n = 1 }
-          if ($n -gt 10) { $n = 10 }
-          $inc = @(); for ($i=1; $i -le $n; $i++){ $inc += @{ id = $i } }
-          $json = @{ include = $inc } | ConvertTo-Json -Compress
-          "matrix=$json" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-  rdp:
-    needs: setup
-    runs-on: ubuntu-latest
-    strategy:
-      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
-      max-parallel: 10
-    timeout-minutes: 360
-    env:
-      RDP_USER: Bullettemporary
-      RDP_PASS: Bullet@12345
-      TS_HOSTNAME: bullet${{ matrix.id }}
-
-    steps:
-      - name: Install & Connect Tailscale
-        run: |
-          echo "Downloading and installing Tailscale..."
-          curl -fsSL https://tailscale.com/install.sh | sh
+          # 1. Manually set XDG variables to fix the XFCE failsafe error
+          export XDG_CONFIG_DIRS=/etc/xdg
+          export XDG_DATA_DIRS=/usr/share:/usr/share/xfce4:/usr/local/share
           
-          echo "Connecting to Tailscale..."
-          sudo tailscale up --authkey="${{ inputs.ts_authkey }}" --hostname="${TS_HOSTNAME}" --accept-routes --accept-dns=false
-          
-          ip4=$(tailscale ip -4)
-          echo "Tailscale IP: $ip4"
-
-      - name: Install Desktop Environment & XRDP
-        run: |
-          sudo apt-get update
-          
-          # Install xfce4, xrdp, virtual framebuffer (xvfb), screenshot tool (scrot), and dbus-x11 (required for xfce4 headless)
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xrdp xvfb scrot dbus-x11
-          
-          sudo systemctl enable xrdp
-          sudo systemctl start xrdp
-          
-          # Create the RDP user
-          sudo useradd -m -s /bin/bash $RDP_USER
-          echo "$RDP_USER:$RDP_PASS" | sudo chpasswd
-          sudo usermod -aG sudo $RDP_USER
-          
-          # Configure xfce4 as the default session for XRDP connections
-          echo "xfce4-session" | sudo tee /home/$RDP_USER/.xsession
-          sudo chown $RDP_USER:$RDP_USER /home/$RDP_USER/.xsession
-          
-          echo "RDP User configured."
-
-      - name: Install RustDesk
-        run: |
-          echo "Downloading RustDesk 1.3.1..."
-          wget -q "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.deb" -O rustdesk.deb
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ./rustdesk.deb || sudo apt-get -f install -y
-          rm rustdesk.deb
-
-      - name: Launch Virtual Display, RustDesk & Screenshot
-        run: |
-          # Start a virtual X server on display :99
+          # 2. Start a virtual X server on display :99
           Xvfb :99 -screen 0 1280x1024x24 &
           export DISPLAY=:99
+          sleep 2
           
-          # Start the desktop environment wrapped in dbus-run-session to prevent crashes
+          # 3. Start the desktop environment wrapped in dbus
           dbus-run-session xfce4-session &
           sleep 5
           
-          # Launch RustDesk in the background
+          # 4. Launch RustDesk in the background
           rustdesk &
           sleep 10
           
-          # Take screenshot of the virtual display
+          # 5. Take screenshot of the virtual display
           scrot rustdesk_${{ matrix.id }}.png
-
-      - name: Upload Screenshot Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rustdesk-screenshot-${{ matrix.id }}
-          path: rustdesk_${{ matrix.id }}.png
-          if-no-files-found: warn
-
-      - name: Keep Alive (355 mins)
-        run: |
-          end_time=$(( $(date +%s) + 355*60 ))
-          while [ $(date +%s) -lt $end_time ]; do
-            echo "[Linux RDP/RustDesk] Heartbeat $(date +'%H:%M:%S') | Ends at $(date -d @$end_time +'%H:%M:%S')"
-            sleep 60
-          done
